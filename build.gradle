@@ -1,0 +1,42 @@
+plugins { id 'com.android.application' version '8.5.2' }
+
+// logo.jpg (ඔයාගේ image එක) repo root එකේ තිබුණොත් app icon + keyboard theme එකට use වෙනවා
+def hasLogo = file('logo.jpg').exists()
+
+android {
+    namespace 'com.lynko.keyboard'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.lynko.keyboard'
+        minSdk 24
+        targetSdk 34
+        versionCode 2
+        versionName '2.0'
+        manifestPlaceholders = [appIcon: hasLogo ? '@drawable/logo' : '@android:drawable/sym_def_app_icon']
+    }
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDir layout.buildDirectory.dir('flatsrc')
+            res.srcDir layout.buildDirectory.dir('flatres')
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+
+// folders නැතිව files තියෙන නිසා build වෙද්දී හරි තැන්වලට copy කරනවා
+tasks.register('flatSrc', Copy) {
+    from('.') { include '*.java' }
+    into layout.buildDirectory.dir('flatsrc')
+}
+tasks.register('flatRes', Copy) {
+    from('method.xml') { into 'xml' }
+    from('logo.jpg') { into 'drawable-nodpi' }
+    into layout.buildDirectory.dir('flatres')
+}
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn 'flatSrc', 'flatRes' }
