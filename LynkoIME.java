@@ -888,6 +888,12 @@ public class LynkoIME extends InputMethodService
             path.close();
         }
 
+        // a bare View with match_parent grabs the whole screen height in a wrap_content parent,
+        // which pushed the keyboard to the top: report 0 size in the first pass, the real size after
+        @Override protected void onMeasure(int w, int h) {
+            setMeasuredDimension(resolveSize(0, w), resolveSize(0, h));
+        }
+
         void burstAt(View k) {
             int[] a = new int[2], b = new int[2];
             k.getLocationInWindow(a);
