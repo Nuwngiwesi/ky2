@@ -9,11 +9,15 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.inputmethodservice.InputMethodService;
 import android.media.AudioManager;
@@ -21,6 +25,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.speech.RecognitionListener;
@@ -67,6 +72,8 @@ public class LynkoIME extends InputMethodService
     static ArrayList<String> hist = new ArrayList<>();
     static Bitmap bgBmp;
     Typeface tf;
+    HeartView heart;
+    boolean late;   // keys inside scrolling panels fire on release
     ArrayList<TextView> letterTvs = new ArrayList<>();
     ArrayList<String> letterBase = new ArrayList<>();
     TextView shiftTv;
@@ -114,7 +121,9 @@ public class LynkoIME extends InputMethodService
     @Override public void onSharedPreferenceChanged(SharedPreferences s, String k) { rebuild(); }
     @Override public void onConfigurationChanged(Configuration c) { super.onConfigurationChanged(c); rebuild(); }
     @Override public boolean onEvaluateFullscreenMode() { return false; }
-    @Override public View onCreateInputView() { return build(); }
+    @Override public View onCreateInputView() {
+        try { return build(); } catch (Throwable t) { return errView(t); }
+    }
 
     @Override public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
@@ -141,7 +150,20 @@ public class LynkoIME extends InputMethodService
     }
 
     // ---------- helpers ----------
-    void rebuild() { setInputView(build()); }
+    void rebuild() {
+        try { setInputView(build()); }
+        catch (Throwable t) { try { setInputView(errView(t)); } catch (Throwable ignored) { } }
+    }
+
+    View errView(Throwable t) {
+        TextView e = new TextView(this);
+        e.setTextColor(0xFFFFFFFF);
+        e.setBackgroundColor(0xFF7F1D1D);
+        e.setPadding(dp(12), dp(12), dp(12), dp(12));
+        e.setTextSize(11);
+        e.setText("LYNKO error: " + t);
+        return e;
+    }
     int dp(int x) { return (int) (x * getResources().getDisplayMetrics().density + 0.5f); }
     int a(int c, int al) { return (c & 0xFFFFFF) | (al << 24); }
     boolean pb(String k) { return p.getBoolean(k, true); }
@@ -165,6 +187,7 @@ public class LynkoIME extends InputMethodService
         int[] r;
         switch (t) {
             case 2: r = new int[]{0xE8EAF0, 0xFFFFFF, 0x111111, 0x5B5BD6}; break;
+            case 6: r = new int[]{0x2A0A22, 0x5C1A45, 0xFFE4F0, 0xFF3D7F}; break;
             case 3: r = new int[]{0x2A1B4D, 0x4B3380, 0xFFFFFF, 0xFF6FD8}; break;
             case 4: r = new int[]{0x000000, 0x0B1F1A, 0x00FFC8, 0xFF2E93}; break;
             case 5: r = new int[]{0x101018, 0x20202C, 0xFFFFFF, 0xEC4899}; break;
@@ -182,9 +205,7 @@ public class LynkoIME extends InputMethodService
             int id = getResources().getIdentifier("logo", "drawable", getPackageName());
             if (id == 0) return null;
             try {
-                BitmapFactory.Options o = new BitmapFactory.Options();
-                o.inSampleSize = 4;
-                bgBmp = BitmapFactory.decodeResource(getResources(), id, o);
+                bgBmp = Engine.decode(getResources(), id, 800);
             } catch (Throwable ignored) { }
         }
         return bgBmp;
@@ -196,6 +217,10 @@ public class LynkoIME extends InputMethodService
             if (b != null) {
                 return new LayerDrawable(new Drawable[]{new BitmapDrawable(getResources(), b), new ColorDrawable(0xB0000000)});
             }
+        }
+        if (p.getInt("theme", 0) == 6) {
+            return new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{a(0x4A0F35, al), a(0x1E0618, al)});
         }
         return new ColorDrawable(a(t[0], al));
     }
@@ -229,6 +254,7 @@ public class LynkoIME extends InputMethodService
         letterTvs.clear();
         letterBase.clear();
         tf = font();
+        late = false;
         int h = dp(p.getInt("height", 46));
 
         LinearLayout r = new LinearLayout(this);
@@ -246,18 +272,23 @@ public class LynkoIME extends InputMethodService
             r.addView(hs, new LinearLayout.LayoutParams(-1, -2));
             refreshStrip();
         }
-        if (panel == 1) emojiPanel(r, t, h);
-        else if (panel == 2) clipPanel(r, t, h);
-        else if (panel == 3) toolsPanel(r, t, h);
+        if (panel == 1) { late = true; emojiPanel(r, t, h); late = false; }
+        else if (panel == 2) { late = true; clipPanel(r, t, h); late = false; }
+        else if (panel == 3) { late = true; toolsPanel(r, t, h); late = false; }
         else keys(r, t, h);
         bottom(r, t, h);
 
         int oh = p.getInt("onehand", 0); // 0 off, 1 left, 2 right, 3 center
-        if (oh == 0) return r;
         FrameLayout f = new FrameLayout(this);
-        int w = (int) (getResources().getDisplayMetrics().widthPixels * p.getInt("compactw", 82) / 100f);
-        int g = oh == 1 ? Gravity.START : oh == 2 ? Gravity.END : Gravity.CENTER_HORIZONTAL;
-        f.addView(r, new FrameLayout.LayoutParams(w, -2, g));
+        if (oh == 0) {
+            f.addView(r, new FrameLayout.LayoutParams(-1, -2));
+        } else {
+            int w = (int) (getResources().getDisplayMetrics().widthPixels * p.getInt("compactw", 82) / 100f);
+            int g = oh == 1 ? Gravity.START : oh == 2 ? Gravity.END : Gravity.CENTER_HORIZONTAL;
+            f.addView(r, new FrameLayout.LayoutParams(w, -2, g));
+        }
+        heart = new HeartView();   // transparent layer on top: hearts fly up when you press keys
+        f.addView(heart, new FrameLayout.LayoutParams(-1, -1));
         return f;
     }
 
@@ -311,7 +342,8 @@ public class LynkoIME extends InputMethodService
         });
         key(b, "🌐", 1.2f, h, t, false, this::nextIme);
         key(b, ",", 1, h, t, false, () -> typeText(","));
-        key(b, sin ? "LYNKO · සිං" : "LYNKO", 4, h, t, false, () -> typeText(" "), null, null, this::picker);
+        key(b, (sin ? "LYNKO · සිං" : "LYNKO") + (p.getInt("theme", 0) == 6 ? " ❤" : ""), 4, h, t, false,
+                () -> typeText(" "), null, null, this::picker);
         key(b, ".", 1, h, t, false, () -> typeText("."));
         key(b, "⏎", 1.5f, h, t, true, this::enter);
     }
@@ -440,8 +472,10 @@ public class LynkoIME extends InputMethodService
         GradientDrawable g = new GradientDrawable();
         g.setColor(a(accent ? t[3] : t[1], kal));
         g.setCornerRadius(radiusPx());
+        int m = dp(p.getInt("gap", 2));
         FrameLayout f = new FrameLayout(this);
-        f.setBackground(g);
+        // the gap between keys is part of the key (inset), so there are no dead zones between keys
+        f.setBackground(new InsetDrawable(g, m));
         TextView tv = new TextView(this);
         tv.setText(label);
         tv.setGravity(Gravity.CENTER);
@@ -455,25 +489,51 @@ public class LynkoIME extends InputMethodService
             ht.setTextSize(10);
             ht.setTextColor(a(t[2], 160));
             FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
-            hp.setMargins(0, dp(1), dp(4), 0);
+            hp.setMargins(0, dp(1) + m, dp(4) + m, 0);
             f.addView(ht, hp);
         }
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, h, w);
-        int m = dp(p.getInt("gap", 2));
-        lp.setMargins(m, m, m, m);
-        f.setOnClickListener(v -> { feedback(v); act.run(); });
-        if (longAct != null) f.setOnLongClickListener(v -> { feedback(v); longAct.run(); return true; });
-        if (p.getInt("anim", 0) > 0) f.setOnTouchListener((v, e) -> {
-            int d = p.getInt("anim", 0);
-            int ac = e.getAction();
-            if (ac == MotionEvent.ACTION_DOWN) v.animate().scaleX(0.9f).scaleY(0.9f).setDuration(d).start();
-            else if (ac == MotionEvent.ACTION_UP || ac == MotionEvent.ACTION_CANCEL)
-                v.animate().scaleX(1f).scaleY(1f).setDuration(d).start();
-            return false;
-        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, h + 2 * m, w);
+        bindTap(f, act, longAct, late);
         if (tag != null) f.setTag(tag);
         l.addView(f, lp);
         return f;
+    }
+
+    /** Key press: fires when you lift the finger, even if it slipped a little outside the key
+     *  (a plain click listener drops those taps, which is why some keys "didn't press"). */
+    void bindTap(final View f, final Runnable act, final Runnable longAct, final boolean lateFeedback) {
+        final boolean[] longFired = new boolean[1];
+        final int d = p.getInt("anim", 0);
+        final Runnable lr = () -> {
+            if (longAct != null) { longFired[0] = true; feedback(f); longAct.run(); }
+        };
+        f.setOnTouchListener((v, e) -> {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    longFired[0] = false;
+                    v.setAlpha(0.7f);
+                    if (d > 0) v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(d).start();
+                    if (!lateFeedback) feedback(v);
+                    if (longAct != null) hd.postDelayed(lr, 450);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    hd.removeCallbacks(lr);
+                    v.setAlpha(1f);
+                    if (d > 0) v.animate().scaleX(1f).scaleY(1f).setDuration(d).start();
+                    if (!longFired[0]) {
+                        if (lateFeedback) feedback(v);
+                        act.run();
+                    }
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    hd.removeCallbacks(lr);
+                    v.setAlpha(1f);
+                    if (d > 0) v.animate().scaleX(1f).scaleY(1f).setDuration(d).start();
+                    return true;
+                default:
+                    return true;
+            }
+        });
     }
 
     void wide(LinearLayout l, String label, int h, int[] t, Runnable act) {
@@ -554,7 +614,7 @@ public class LynkoIME extends InputMethodService
                 chip(c, () -> replaceSwipe(c));
             }
         } else {
-            List<String> em = Engine.emojis();
+            List<String> em = p.getInt("theme", 0) == 6 ? Engine.romEmojis() : Engine.emojis();
             for (int i = 0; i < 16 && i < em.size(); i++) {
                 final String e = em.get(i);
                 chip(e, () -> typeText(e));
@@ -644,7 +704,12 @@ public class LynkoIME extends InputMethodService
         ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showInputMethodPicker();
     }
 
+    boolean heartsOn() {
+        return p.getBoolean("hearts", true) && (p.getInt("theme", 0) == 6 || p.getBoolean("heartsall", false));
+    }
+
     void feedback(View v) {
+        if (heart != null && heartsOn()) heart.burstAt(v);
         if (p.getBoolean("vibrate", true))
             v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
         if (p.getBoolean("sound", false))
@@ -770,6 +835,8 @@ public class LynkoIME extends InputMethodService
 
         boolean on() { return p.getBoolean("swipe", true) && !sin && sym == 0 && panel == 0; }
 
+        boolean multi;   // a second finger touched: that is fast typing, never a swipe
+
         @Override public boolean onInterceptTouchEvent(MotionEvent e) {
             if (!on()) return false;
             switch (e.getActionMasked()) {
@@ -778,8 +845,13 @@ public class LynkoIME extends InputMethodService
                     pts.clear();
                     pts.add(new float[]{sx, sy});
                     swiping = false;
+                    multi = false;
                     return false;
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    multi = true;
+                    return swiping;
                 case MotionEvent.ACTION_MOVE:
+                    if (multi || e.getPointerCount() > 1) return swiping;
                     pts.add(new float[]{e.getX(), e.getY()});
                     if (!swiping && Math.hypot(e.getX() - sx, e.getY() - sy) > dp(30)) swiping = true;
                     return swiping;
@@ -795,6 +867,66 @@ public class LynkoIME extends InputMethodService
             else if (ac == MotionEvent.ACTION_UP) { swiping = false; swipeDone(new ArrayList<>(pts), this); }
             else if (ac == MotionEvent.ACTION_CANCEL) swiping = false;
             return true;
+        }
+    }
+
+    /** Transparent layer: little hearts float up from the pressed key. Touches pass straight through. */
+    class HeartView extends View {
+        final ArrayList<float[]> hs = new ArrayList<>(); // x, y, vx, vy, size, age, colorIdx, sway
+        final Paint pt = new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Path path = new Path();
+        final java.util.Random rnd = new java.util.Random();
+        final int[] cols = {0xFFFF3D7F, 0xFFFF6FA5, 0xFFFF8FB8, 0xFFE11D48, 0xFFFFB3D1, 0xFFFF5C93};
+        long last;
+
+        HeartView() {
+            super(LynkoIME.this);
+            setWillNotDraw(false);
+            path.moveTo(0f, 0.9f);
+            path.cubicTo(-1.3f, -0.1f, -0.7f, -1.0f, 0f, -0.35f);
+            path.cubicTo(0.7f, -1.0f, 1.3f, -0.1f, 0f, 0.9f);
+            path.close();
+        }
+
+        void burstAt(View k) {
+            int[] a = new int[2], b = new int[2];
+            k.getLocationInWindow(a);
+            getLocationInWindow(b);
+            burst(a[0] - b[0] + k.getWidth() / 2f, a[1] - b[1] + k.getHeight() * 0.35f);
+        }
+
+        void burst(float x, float y) {
+            for (int i = 0; i < 3 && hs.size() < 45; i++) {
+                hs.add(new float[]{x + (rnd.nextFloat() - 0.5f) * dp(22), y,
+                        (rnd.nextFloat() - 0.5f) * dp(46), -(dp(80) + rnd.nextFloat() * dp(110)),
+                        dp(7) + rnd.nextFloat() * dp(8), 0f, rnd.nextInt(cols.length), rnd.nextFloat() * 6.28f});
+            }
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            long now = SystemClock.uptimeMillis();
+            float dt = last == 0 ? 16f : Math.min(now - last, 50);
+            last = now;
+            final float life = 1100f;
+            for (int i = hs.size() - 1; i >= 0; i--) {
+                float[] q = hs.get(i);
+                q[5] += dt;
+                if (q[5] >= life) { hs.remove(i); continue; }
+                q[0] += q[2] * dt / 1000f;
+                q[1] += q[3] * dt / 1000f;
+                float left = (life - q[5]) / 450f;
+                int al = (int) (255 * Math.min(1f, left));
+                float sway = (float) Math.sin(q[5] / 170f + q[7]) * dp(5);
+                pt.setColor(cols[(int) q[6]]);
+                pt.setAlpha(al);
+                c.save();
+                c.translate(q[0] + sway, q[1]);
+                c.scale(q[4], q[4]);
+                c.drawPath(path, pt);
+                c.restore();
+            }
+            if (hs.isEmpty()) last = 0; else postInvalidateOnAnimation();
         }
     }
 
@@ -936,6 +1068,25 @@ class Engine {
         }
         return b.toString();
     }
+
+    /** Decode a drawable without ever creating a giant bitmap (a huge logo.jpg used to crash the app). */
+    static Bitmap decode(android.content.res.Resources res, int id, int maxPx) {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeResource(res, id, o);
+            int sample = 1;
+            while (o.outWidth / sample > maxPx || o.outHeight / sample > maxPx) sample *= 2;
+            BitmapFactory.Options o2 = new BitmapFactory.Options();
+            o2.inSampleSize = sample;
+            return BitmapFactory.decodeResource(res, id, o2);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    static final String[] ROM = {"❤", "💕", "💖", "💗", "💘", "💝", "😍", "😘", "🥰", "💋", "🌹", "💞", "😻", "💑", "🌸", "✨"};
+    static List<String> romEmojis() { return java.util.Arrays.asList(ROM); }
 
     // ---- emoji ----
     static final String EMO = "😂❤😍🔥👍🙏😭😊🥰😎😘🤣😁🥺😀😃😄😆😅😇🙂😉😋🤩🥳😏😒😞😔😢😤😠😡🤯😳😱😨🤗🤔🤭🤫😐🙄😬😴🤤😷🤒🤧🥵🥶🤪😜🤑😈💀👻👽🤖💩🙈🙉🙊🧡💛💚💙💜🖤🤍💔💕💖💗💯✨⭐🌈🎉🎊🎁👎👏🙌🤝💪👌🤞👋🤙👀🧠🍕🍔🍟🍿🍩🍪🍺⚽🎮🎵🚗🏠";
