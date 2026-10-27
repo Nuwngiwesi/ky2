@@ -83,8 +83,11 @@ public class LynkoIME extends InputMethodService
     static final String[] EN = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
     static final String[] EH = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
             "@", "#", "$", "_", "&", "-", "+", "(", ")", "*", "\"", "'", ":", ";", "!", "?"};
-    static final String[] SH = {"ඤ", "ඬ", "ඒ", "ඍ", "ඨ", "ඹ", "ඌ", "ඊ", "ඕ", "ඵ",
-            "ආ", "ශ", "ධ", "ෆ", "ඝ", "ඃ", "ඣ", "ඛ", "ළ", "ඥ", "ං", "ඡ", "ෘ", "භ", "ණ", "ඞ"};
+    // Sinhala letter shown on each key (same order as LET: q w e r t y u i o p a s d f g h j k l z x c v b n m).
+    // Long-press a key to type that letter directly; tapping still uses Singlish (mama -> මම).
+    static final String[] SH = {"ඳ", "ව", "එ", "ර", "ට", "ය", "උ", "ඉ", "ඔ", "ප",
+            "අ", "ස", "ඩ", "ෆ", "ග", "හ", "ජ", "ක", "ල",
+            "ඤ", "ං", "ච", "ව", "බ", "න", "ම"};
     static final String[] SYM1 = {"1234567890", "@#$%&-+()/", "*\"':;!?"};
     static final String[] SYM2 = {"~`|^=_[]{}", "<>\\€£¥•°©®", "™§¶…×÷±¿¡"};
 
@@ -486,8 +489,8 @@ public class LynkoIME extends InputMethodService
         if (hint != null && p.getBoolean("hints", true)) {
             TextView ht = new TextView(this);
             ht.setText(hint);
-            ht.setTextSize(10);
-            ht.setTextColor(a(t[2], 160));
+            ht.setTextSize(sin ? 12 : 10);
+            ht.setTextColor(a(t[2], sin ? 230 : 160));
             FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
             hp.setMargins(0, dp(1) + m, dp(4) + m, 0);
             f.addView(ht, hp);
