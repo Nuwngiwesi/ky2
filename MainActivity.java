@@ -7,6 +7,7 @@ import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -32,10 +33,11 @@ import java.util.Map;
 public class MainActivity extends Activity {
     static final int BG = 0xFF0F0E17, CARD = 0xFF1B1A2B, CARD2 = 0xFF2A2840,
             ACC = 0xFF8B5CF6, ACC2 = 0xFFEC4899, SUB = 0xFFA7A3C2, WHITE = 0xFFFFFFFF;
-    static final String[] THEMES = {"Auto", "Dark", "Light", "Purple", "Neon", "LYNKO"};
-    static final int[] TCOL = {0xFF64748B, 0xFF1E1E2E, 0xFFE8EAF0, 0xFF4B3380, 0xFF00C8A0, 0xFFEC4899};
+    static final String[] THEMES = {"Auto", "Dark", "Light", "Purple", "Neon", "LYNKO", "Romantic"};
+    static final int[] TCOL = {0xFF64748B, 0xFF1E1E2E, 0xFFE8EAF0, 0xFF4B3380, 0xFF00C8A0, 0xFFEC4899, 0xFFFF3D7F};
 
     SharedPreferences p;
+    Bitmap logoBmp;
     ScrollView sv;
     LinearLayout content, nav;
     int cur = -1;
@@ -60,7 +62,7 @@ public class MainActivity extends Activity {
         nav.setPadding(0, dp(6), 0, dp(6));
         root.addView(nav, new LinearLayout.LayoutParams(-1, -2));
         setContentView(root);
-        handle(getIntent());
+        try { handle(getIntent()); } catch (Throwable t) { showError(t); }
     }
 
     @Override protected void onNewIntent(Intent i) { super.onNewIntent(i); setIntent(i); handle(i); }
@@ -141,10 +143,11 @@ public class MainActivity extends Activity {
 
     View logo(int size) {
         int id = getResources().getIdentifier("logo", "drawable", getPackageName());
+        if (logoBmp == null && id != 0) logoBmp = Engine.decode(getResources(), id, 512);
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.OVAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(size), dp(size));
-        if (id == 0) {
+        if (id == 0 || logoBmp == null) {
             g.setColors(new int[]{ACC, ACC2});
             TextView t = tv("L", size / 2, WHITE, true);
             t.setGravity(Gravity.CENTER);
@@ -154,7 +157,7 @@ public class MainActivity extends Activity {
         }
         g.setColor(CARD2);
         ImageView iv = new ImageView(this);
-        iv.setImageResource(id);
+        iv.setImageBitmap(logoBmp);
         iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
         iv.setBackground(g);
         iv.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
@@ -202,15 +205,31 @@ public class MainActivity extends Activity {
         content.setGravity(Gravity.TOP);
         buildNav();
         nav.setVisibility(s >= 2 ? View.VISIBLE : View.GONE);
-        switch (s) {
-            case 0: welcome(); break;
-            case 1: setup(); break;
-            case 2: home(); break;
-            case 3: preview(); break;
-            case 4: settings(); break;
-            default: about();
-        }
+        try {
+            switch (s) {
+                case 0: welcome(); break;
+                case 1: setup(); break;
+                case 2: home(); break;
+                case 3: preview(); break;
+                case 4: settings(); break;
+                default: about();
+            }
+        } catch (Throwable t) { showError(t); }
         sv.post(() -> sv.scrollTo(0, keep));
+    }
+
+    void showError(Throwable t) {
+        java.io.StringWriter w = new java.io.StringWriter();
+        t.printStackTrace(new java.io.PrintWriter(w));
+        content.removeAllViews();
+        content.setGravity(Gravity.TOP);
+        nav.setVisibility(View.GONE);
+        content.addView(tv("Something went wrong", 22, WHITE, true));
+        content.addView(tv("Screenshot / copy this and send it to fix it:", 13, SUB, false));
+        TextView e = tv(w.toString(), 11, SUB, false);
+        e.setTextIsSelectable(true);
+        content.addView(e);
+        content.addView(btn("Reset app settings", () -> { p.edit().clear().apply(); show(0); }));
     }
 
     // ---------- screens ----------
@@ -324,8 +343,8 @@ public class MainActivity extends Activity {
         for (int i = 0; i < THEMES.length; i++) {
             final int k = i;
             TextView c = new TextView(this);
-            c.setText(THEMES[i]);
-            c.setTextSize(11);
+            c.setText(i == 6 ? "❤ " + THEMES[i] : THEMES[i]);
+            c.setTextSize(10);
             c.setGravity(Gravity.CENTER);
             c.setTextColor(i == 2 ? 0xFF111111 : WHITE);
             c.setPadding(0, dp(14), 0, dp(14));
@@ -391,6 +410,8 @@ public class MainActivity extends Activity {
         LinearLayout b = card();
         b.addView(tv("Typing", 18, WHITE, true));
         sw(b, "Vibration", "vibrate", true);
+        sw(b, "❤ Hearts when you press keys (Romantic theme)", "hearts", true);
+        sw(b, "Hearts in every theme", "heartsall", false);
         sw(b, "Key sound", "sound", false);
         sw(b, "Key hints (small characters)", "hints", true);
         sw(b, "Number row", "numrow", false);
@@ -468,7 +489,7 @@ public class MainActivity extends Activity {
     }
 
     void about() {
-        header("About LYNKO", "Version 2.0");
+        header("About LYNKO", "Version 2.1");
         LinearLayout c = card();
         c.addView(tv("Privacy", 18, WHITE, true));
         c.addView(tv("Everything you type is handled on your phone. The internet is used only when you tap "
