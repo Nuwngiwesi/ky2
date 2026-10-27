@@ -250,14 +250,23 @@ public class MainActivity extends Activity {
         add(content, btn("Get started", () -> { p.edit().putBoolean("seen", true).apply(); show(1); }));
     }
 
+    // Android 14+ blocks reading Settings.Secure directly, so ask InputMethodManager instead
     boolean enabled() {
-        String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_INPUT_METHODS);
-        return s != null && s.contains(getPackageName());
+        try {
+            InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            for (android.view.inputmethod.InputMethodInfo i : imm.getEnabledInputMethodList())
+                if (i.getPackageName().equals(getPackageName())) return true;
+        } catch (Throwable ignored) { }
+        return false;
     }
 
     boolean selected() {
-        String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
-        return s != null && s.contains(getPackageName());
+        try {
+            String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
+            return s != null && s.contains(getPackageName());
+        } catch (Throwable t) {
+            return enabled(); // can't read it on this Android version: trust "enabled"
+        }
     }
 
     boolean micOk() { return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED; }
